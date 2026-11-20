@@ -37,7 +37,34 @@
 - Сжатие: `zstd`, `xz` или `gzip`. По умолчанию берётся первая найденная.
 - Для `encrypt_keyfile` — `openssl` из базы.
 
+## Перенос на сервер
+
+На сервер едут только сценарии. Собирать нечего, порты ставить не нужно.
+`tests/` и `docs/` на FreeBSD не копируйте: это проверка и инструкция,
+они работают без сервера.
+
+С машины, где лежит этот каталог и откуда есть ssh до сервера:
+
+```sh
+tar czf /tmp/cifsbak.tar.gz bin lib Makefile cifsbak.conf.example contrib
+scp /tmp/cifsbak.tar.gz root@server:/root/
+ssh root@server
+tar xzf cifsbak.tar.gz
+make install
+```
+
+Без make те же файлы кладутся так:
+
+```sh
+install -d /usr/local/sbin /usr/local/libexec/cifsbak /usr/local/etc
+install -m 755 bin/cifsbak /usr/local/sbin/cifsbak
+install -m 644 lib/*.sh /usr/local/libexec/cifsbak/
+install -m 644 cifsbak.conf.example /usr/local/etc/cifsbak.conf.example
+```
+
 ## Установка
+
+Если файлы уже на сервере:
 
 ```sh
 make install
