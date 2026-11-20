@@ -1,0 +1,38 @@
+Geom name: nda0
+modified: false
+state: OK
+fwheads: 255
+fwsectors: 63
+last: 20971439
+first: 40
+entries: 128
+scheme: GPT
+Providers:
+1. Name: nda0p1
+   Mediasize: 272629760 (260M)
+   Sectorsize: 512
+   Mode: r0w0e0
+   label: efiboot0
+   length: 272629760
+   offset: 20480
+   type: efi
+   index: 1
+   end: 532519
+   start: 40
+2. Name: nda0p2
+   Mediasize: 2147483648 (2.0G)
+   Sectorsize: 512
+   label: swap0
+   type: freebsd-swap
+   index: 2
+3. Name: nda0p3
+   Mediasize: 8589934592 (8.0G)
+   Sectorsize: 512
+   label: zfs0
+   type: freebsd-zfs
+   index: 3
+Consumers:
+1. Name: nda0
+   Mediasize: 10737418240 (10G)
+   Sectorsize: 512
+   Mode: r0w0e0

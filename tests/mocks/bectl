@@ -1,0 +1,4 @@
+#!/bin/sh
+set -eu
+printf '%s\n' 'default NR / 2026-01-01 1G -'
+exit 0

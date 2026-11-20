@@ -1,0 +1,172 @@
+#!/bin/sh
+set -eu
+STATE=${CIFSBAK_MOCK_STATE:?}
+printf '%s\n' "$*" >>"$STATE/zpool.log"
+[ -f "$STATE/pools" ] || : >"$STATE/pools"
+cmd=${1:?}
+shift
+
+active() {
+    awk -v p="$1" '$0 == p { found = 1 } END { exit found ? 0 : 1 }' "$STATE/pools"
+}
+
+prop() {
+    file=$STATE/poolprops.$1
+    [ -f "$file" ] || return 0
+    awk -F '=' -v k="$2" '$1 == k { print substr($0, index($0, "=") + 1); exit }' "$file"
+}
+
+case $cmd in
+    list)
+        target=
+        while [ $# -gt 0 ]; do
+            case $1 in
+                -H) shift ;;
+                -o) shift 2 ;;
+                --) shift; target=${1:-}; [ $# -gt 0 ] && shift ;;
+                -*) printf 'zpool mock: list %s\n' "$1" >&2; exit 1 ;;
+                *) target=$1; shift ;;
+            esac
+        done
+        if [ -n "$target" ]; then
+            active "$target" || exit 1
+            printf '%s\n' "$target"
+            exit 0
+        fi
+        cat "$STATE/pools"
+        ;;
+    status)
+        pool=
+        while [ $# -gt 0 ]; do
+            case $1 in
+                -P|-v) shift ;;
+                --) shift; pool=${1:-}; [ $# -gt 0 ] && shift ;;
+                -*) shift ;;
+                *) pool=$1; shift ;;
+            esac
+        done
+        if [ -f "$STATE/status.$pool" ]; then
+            cat "$STATE/status.$pool"
+        else
+            printf '  pool: %s\n state: ONLINE\nconfig:\n\n\tNAME\tSTATE\n\t%s\tONLINE\n\t  disk\tONLINE\n\nerrors: No known data errors\n' "$pool" "$pool"
+        fi
+        ;;
+    get)
+        mode=all
+        propname=
+        pool=
+        while [ $# -gt 0 ]; do
+            case $1 in
+                -H) shift ;;
+                -o)
+                    shift
+                    if [ "$1" = value ]; then
+                        mode=value
+                    fi
+                    shift
+                    ;;
+                all) shift ;;
+                --) shift; pool=${1:-}; [ $# -gt 0 ] && shift ;;
+                -*) printf 'zpool mock: get %s\n' "$1" >&2; exit 1 ;;
+                *)
+                    if [ "$mode" = value ] && [ -z "$propname" ]; then
+                        propname=$1
+                    else
+                        pool=$1
+                    fi
+                    shift
+                    ;;
+            esac
+        done
+        active "$pool" || exit 1
+        if [ "$mode" = value ]; then
+            val=$(prop "$pool" "$propname")
+            printf '%s\n' "${val:--}"
+            exit 0
+        fi
+        printf '%s ashift %s local\n' "$pool" "$(prop "$pool" ashift)"
+        printf '%s bootfs %s local\n' "$pool" "$(prop "$pool" bootfs)"
+        printf '%s autoexpand %s default\n' "$pool" "$(prop "$pool" autoexpand)"
+        printf '%s autotrim %s default\n' "$pool" "$(prop "$pool" autotrim)"
+        printf '%s altroot %s local\n' "$pool" "$(prop "$pool" altroot)"
+        ;;
+    history)
+        pool=
+        while [ $# -gt 0 ]; do
+            case $1 in
+                --) shift; pool=${1:-}; [ $# -gt 0 ] && shift ;;
+                *) pool=$1; shift ;;
+            esac
+        done
+        printf 'history of %s\n' "$pool"
+        ;;
+    create)
+        alt=-
+        ashift=0
+        pool=
+        while [ $# -gt 0 ]; do
+            case $1 in
+                -f) shift ;;
+                -R) alt=$2; shift 2 ;;
+                -o|-O)
+                    kv=$2
+                    shift 2
+                    key=${kv%%=*}
+                    val=${kv#*=}
+                    if [ "$key" = ashift ]; then
+                        ashift=$val
+                    fi
+                    ;;
+                -*) printf 'zpool mock: create %s\n' "$1" >&2; exit 1 ;;
+                *)
+                    pool=$1
+                    shift
+                    break
+                    ;;
+            esac
+        done
+        [ -n "$pool" ] || { printf 'zpool mock: create без имени\n' >&2; exit 1; }
+        if active "$pool"; then
+            printf 'zpool mock: пул %s уже есть\n' "$pool" >&2
+            exit 1
+        fi
+        printf '%s\n' "$pool" >>"$STATE/pools"
+        cat >"$STATE/poolprops.$pool" <<EOF
+ashift=$ashift
+bootfs=-
+autoexpand=off
+autotrim=off
+altroot=$alt
+EOF
+        if ! awk -F '\t' -v d="$pool" '$1 == d { found = 1 } END { exit found ? 0 : 1 }' "$STATE/datasets"; then
+            printf '%s\tnone\toff\t-\toff\n' "$pool" >>"$STATE/datasets"
+        fi
+        ;;
+    export)
+        pool=${1:-}
+        [ "$pool" = "--" ] && pool=${2:-}
+        tmp=$STATE/pools.new
+        awk -v p="$pool" '$0 != p && NF' "$STATE/pools" >"$tmp"
+        mv "$tmp" "$STATE/pools"
+        ;;
+    destroy)
+        pool=
+        while [ $# -gt 0 ]; do
+            case $1 in
+                -f) shift ;;
+                --) shift; pool=${1:-}; [ $# -gt 0 ] && shift ;;
+                *) pool=$1; shift ;;
+            esac
+        done
+        [ "$pool" = cifsbakdrill ] || { printf 'zpool mock: destroy %s запрещён\n' "$pool" >&2; exit 1; }
+        awk -v p="$pool" '$0 != p && NF' "$STATE/pools" >"$STATE/pools.new"
+        mv "$STATE/pools.new" "$STATE/pools"
+        awk -F '\t' -v p="$pool" 'BEGIN { OFS = "\t" } $1 != p && index($1, p "/") != 1 { print }' \
+            "$STATE/datasets" >"$STATE/datasets.new"
+        mv "$STATE/datasets.new" "$STATE/datasets"
+        ;;
+    *)
+        printf 'zpool mock: неизвестная команда %s\n' "$cmd" >&2
+        exit 1
+        ;;
+esac

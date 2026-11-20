@@ -1,0 +1,4 @@
+GPT 128
+1 efi 40 532480 efiboot0
+2 freebsd-swap 532520 4194304 swap0
+3 freebsd-zfs 4726824 16244616 zfs0

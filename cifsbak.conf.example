@@ -1,0 +1,83 @@
+# cifsbak. Скопируйте в /usr/local/etc/cifsbak.conf и выполните: chmod 600
+# Пароль в этом файле или в cifs_password_file. Каталог бэкапа содержит
+# /etc/master.passwd и ключи хоста, поэтому шара не менее секретна, чем сервер.
+
+# Куда складывать копии. Для cifs_mode=nomount каталог уже должен быть
+# точкой монтирования шары. Для cifs_mode=mount cifsbak монтирует её сам.
+destination=/mnt/backup
+
+# nomount — шара смонтирована заранее (fstab, рекомендуется).
+# mount — cifsbak вызывает mount_smbfs на время бэкапа.
+cifs_mode=nomount
+
+# Эти поля нужны только при cifs_mode=mount.
+# Домен пишите в cifs_workgroup, не в cifs_user: символ @ в имени запрещён.
+cifs_host=nas.example
+cifs_share=freebsd-backup
+cifs_user=backup
+cifs_password=CHANGE-ME
+# cifs_password_file=/usr/local/etc/cifsbak.password
+cifs_workgroup=WORKGROUP
+
+# full — каждая копия восстанавливается сама по себе.
+# auto — инкремент от последней, полный заново каждые full_every_days.
+backup_mode=full
+full_every_days=7
+
+# Сколько точек восстановления хранить на шаре. Предки инкремента не
+# удаляются, пока жив сам инкремент.
+keep_copies=3
+
+# Сколько своих снимков cifsbak-* оставлять на сервере.
+keep_source_snapshots=2
+
+# auto | zstd | xz | gzip | none. auto берёт первую найденную из zstd, xz, gzip.
+compress=auto
+
+# Если задан, потоки шифруются openssl aes-256-cbc после сжатия.
+# Файл — парольная фраза, одна строка, режим 600. В бэкап ключ не кладётся.
+# encrypt_keyfile=/usr/local/etc/cifsbak.key
+
+# Префикс снимков ZFS. Чужие снимки cifsbak не удаляет.
+snapshot_prefix=cifsbak
+
+# Снимок ZFS согласован на уровне сбоя. Для базы сделайте checkpoint до него.
+# post_hook вызывается сразу после снимка и ещё раз при ошибке, если не успел.
+# pre_hook=su -m postgres -c 'psql -c "CHECKPOINT"'
+# post_hook=
+
+# Не начинать, если на шаре меньше свободного места (МиБ).
+# Некоторые серверы CIFS сообщают 0: тогда поставьте 0.
+min_free_mb=2048
+
+# Образ ESP не снимается, если раздел больше этого размера (МиБ).
+max_efi_mb=768
+
+# Повторы отправки одного датасета и дампа UFS.
+send_attempts=2
+
+# 0 — не понижать приоритет. Иначе nice -n.
+nice_level=10
+
+# Отдельной строкой «да» разрешает писать бэкап на тот же пул, который
+# сохраняется. По умолчанию это ошибка: копия заполнит единственный диск.
+allow_same_pool=no
+
+# Письмо через mail(1) в конце бэкапа. Пусто — не писать.
+mail_to=
+
+# Пробное восстановление (cifsbak drill) создаёт файл такого размера.
+# Его должно хватить на занятые данные отправляемых датасетов.
+drill_dir=/var/tmp
+drill_size_gb=8
+
+# Пусто — все импортированные пулы. Иначе только перечисленные.
+# pools=zroot
+
+# Эти датасеты есть на снимке (он рекурсивный), но в поток не попадают.
+# После восстановления их нужно создать пустыми, команда есть в RESTORE.txt.
+exclude_datasets=zroot/tmp zroot/var/tmp zroot/var/crash
+
+# Дополнительный список, по одному датасету на строку.
+# Указанный датасет и всё, что лежит внутри него, в поток не попадают.
+# exclude_file=/usr/local/etc/cifsbak.exclude

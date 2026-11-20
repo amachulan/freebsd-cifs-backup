@@ -1,0 +1,6 @@
+# Время — локальное время сервера. Имена каталогов бэкапа при этом в UTC.
+# /etc/crontab (есть поле пользователя):
+15 3 * * * root /usr/local/sbin/cifsbak backup
+
+# crontab -u root (поля пользователя нет):
+# 15 3 * * * /usr/local/sbin/cifsbak backup

@@ -1,0 +1,11 @@
+  pool: zroot
+ state: ONLINE
+config:
+
+        NAME        STATE     READ WRITE CKSUM
+        zroot       ONLINE       0     0     0
+          mirror-0  ONLINE       0     0     0
+            nda0p3  ONLINE       0     0     0
+            nda1p3  ONLINE       0     0     0
+
+errors: No known data errors

@@ -1,0 +1,9 @@
+zroot	none	off	-	off
+zroot/ROOT	none	off	-	off
+zroot/ROOT/default	/	off	-	noauto
+zroot/tmp	/tmp	off	-	on
+zroot/var	/var	off	-	on
+zroot/var/tmp	/var/tmp	off	-	on
+zroot/var/crash	/var/crash	off	-	on
+zroot/usr	/usr	off	-	off
+zroot/usr/home	/usr/home	off	-	on

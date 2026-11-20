@@ -1,0 +1,259 @@
+#!/bin/sh
+# Подмена zfs для прогона без FreeBSD. Состояние — каталог CIFSBAK_MOCK_STATE.
+set -eu
+STATE=${CIFSBAK_MOCK_STATE:?}
+printf '%s\n' "$*" >>"$STATE/zfs.log"
+[ -f "$STATE/snapshots" ] || : >"$STATE/snapshots"
+[ -f "$STATE/datasets" ] || : >"$STATE/datasets"
+cmd=${1:?}
+shift
+
+ds_exists() {
+    awk -F '\t' -v d="$1" '$1 == d { found = 1 } END { exit found ? 0 : 1 }' "$STATE/datasets"
+}
+
+snap_exists() {
+    awk -F '\t' -v d="$1" -v s="$2" '$1 == d && $2 == s { found = 1 } END { exit found ? 0 : 1 }' "$STATE/snapshots"
+}
+
+add_snap() {
+    if ! snap_exists "$1" "$2"; then
+        printf '%s\t%s\n' "$1" "$2" >>"$STATE/snapshots"
+    fi
+}
+
+under_pool() {
+    case $1 in
+        "$2"|"$2"/*) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+pool_of() {
+    case $1 in
+        */*) printf '%s\n' "${1%%/*}" ;;
+        *) printf '%s\n' "$1" ;;
+    esac
+}
+
+prop() {
+    awk -F '=' -v k="$2" '$1 == k { print substr($0, index($0, "=") + 1); exit }' "$STATE/poolprops.$1" 2>/dev/null || true
+}
+
+case $cmd in
+    list)
+        recursive=0
+        stype=
+        fields=name
+        target=
+        while [ $# -gt 0 ]; do
+            case $1 in
+                -H) shift ;;
+                -r) recursive=1; shift ;;
+                -t) stype=$2; shift 2 ;;
+                -o) fields=$2; shift 2 ;;
+                --) shift; target=${1:-}; [ $# -gt 0 ] && shift ;;
+                -*) printf 'zfs mock: неизвестный флаг %s\n' "$1" >&2; exit 1 ;;
+                *) target=$1; shift ;;
+            esac
+        done
+        if [ "$stype" = snapshot ]; then
+            case $target in
+                *@*)
+                    ds=${target%@*}
+                    sn=${target#*@}
+                    if snap_exists "$ds" "$sn"; then
+                        printf '%s@%s\n' "$ds" "$sn"
+                        exit 0
+                    fi
+                    exit 1
+                    ;;
+            esac
+            pool=$target
+            while IFS=$(printf '\t') read -r ds sn; do
+                [ -n "$ds" ] || continue
+                if under_pool "$ds" "$pool"; then
+                    printf '%s@%s\n' "$ds" "$sn"
+                fi
+            done <"$STATE/snapshots"
+            exit 0
+        fi
+        if [ "$target" = / ]; then
+            cat "$STATE/root"
+            exit 0
+        fi
+        if [ "$recursive" = 1 ]; then
+            while IFS=$(printf '\t') read -r name mp enc origin canmount; do
+                [ -n "$name" ] || continue
+                under_pool "$name" "$target" || continue
+                if [ "$fields" = name ]; then
+                    printf '%s\n' "$name"
+                else
+                    printf '%s\t%s\t%s\t%s\t%s\n' "$name" "$mp" "$enc" "$origin" "$canmount"
+                fi
+            done <"$STATE/datasets"
+            exit 0
+        fi
+        if ds_exists "$target"; then
+            printf '%s\n' "$target"
+            exit 0
+        fi
+        exit 1
+        ;;
+    snapshot)
+        recursive=0
+        spec=
+        while [ $# -gt 0 ]; do
+            case $1 in
+                -r) recursive=1; shift ;;
+                --) shift; spec=${1:-}; [ $# -gt 0 ] && shift ;;
+                -*) printf 'zfs mock: snapshot %s\n' "$1" >&2; exit 1 ;;
+                *) spec=$1; shift ;;
+            esac
+        done
+        pool=${spec%@*}
+        snap=${spec#*@}
+        found=0
+        while IFS=$(printf '\t') read -r name mp enc origin canmount; do
+            [ -n "$name" ] || continue
+            if [ "$recursive" = 1 ]; then
+                under_pool "$name" "$pool" || continue
+            else
+                [ "$name" = "$pool" ] || continue
+            fi
+            add_snap "$name" "$snap"
+            found=1
+        done <"$STATE/datasets"
+        [ "$found" = 1 ] || { printf 'zfs mock: нет датасетов для %s\n' "$spec" >&2; exit 1; }
+        ;;
+    hold|release)
+        exit 0
+        ;;
+    destroy)
+        spec=
+        while [ $# -gt 0 ]; do
+            case $1 in
+                -r) shift ;;
+                --) shift; spec=${1:-}; [ $# -gt 0 ] && shift ;;
+                -*) shift ;;
+                *) spec=$1; shift ;;
+            esac
+        done
+        pool=${spec%@*}
+        snap=${spec#*@}
+        awk -F '\t' -v p="$pool" -v s="$snap" '
+            BEGIN { OFS = "\t" }
+            $2 == s && ($1 == p || index($1, p "/") == 1) { next }
+            NF { print }
+        ' "$STATE/snapshots" >"$STATE/snapshots.new"
+        mv "$STATE/snapshots.new" "$STATE/snapshots"
+        ;;
+    send)
+        raw=0
+        parent=
+        spec=
+        while [ $# -gt 0 ]; do
+            case $1 in
+                -v|-p|-n|-P) shift ;;
+                -w) raw=1; shift ;;
+                -i) parent=$2; shift 2 ;;
+                --) shift; spec=${1:-}; [ $# -gt 0 ] && shift ;;
+                -*) printf 'zfs mock: send %s\n' "$1" >&2; exit 1 ;;
+                *) spec=$1; shift ;;
+            esac
+        done
+        if [ -f "$STATE/fail_send" ]; then
+            printf 'zfs mock: send принудительно сломан\n' >&2
+            exit 1
+        fi
+        ds=${spec%@*}
+        snap=${spec#*@}
+        psnap=
+        if [ -n "$parent" ]; then
+            psnap=${parent#*@}
+            if ! snap_exists "$ds" "$psnap"; then
+                printf 'zfs mock: нет родителя %s@%s\n' "$ds" "$psnap" >&2
+                exit 1
+            fi
+        fi
+        if ! snap_exists "$ds" "$snap"; then
+            printf 'zfs mock: нет снимка %s\n' "$spec" >&2
+            exit 1
+        fi
+        printf 'send %s\n' "$spec" >&2
+        printf 'MOCKSTREAM\n'
+        printf 'dataset=%s\n' "$ds"
+        printf 'snap=%s\n' "$snap"
+        printf 'parent=%s\n' "$psnap"
+        printf 'raw=%s\n' "$raw"
+        ;;
+    receive)
+        dest=
+        while [ $# -gt 0 ]; do
+            case $1 in
+                -u|-F|-v) shift ;;
+                --) shift; dest=${1:-}; [ $# -gt 0 ] && shift ;;
+                -*) printf 'zfs mock: receive %s\n' "$1" >&2; exit 1 ;;
+                *) dest=$1; shift ;;
+            esac
+        done
+        [ -n "$dest" ] || { printf 'zfs mock: receive без назначения\n' >&2; exit 1; }
+        seen=0
+        dataset=
+        snap=
+        parent=
+        while IFS= read -r line; do
+            case $line in
+                MOCKSTREAM) seen=1 ;;
+                dataset=*) dataset=${line#dataset=} ;;
+                snap=*) snap=${line#snap=} ;;
+                parent=*) parent=${line#parent=} ;;
+                raw=*) ;;
+            esac
+        done
+        [ "$seen" = 1 ] || { printf 'zfs mock: это не поток\n' >&2; exit 1; }
+        [ -n "$snap" ] || { printf 'zfs mock: в потоке нет снимка\n' >&2; exit 1; }
+        if [ -n "$parent" ] && ! snap_exists "$dest" "$parent"; then
+            printf 'zfs mock: у %s нет родительского снимка %s\n' "$dest" "$parent" >&2
+            exit 1
+        fi
+        case $dest in
+            */*)
+                parent_ds=${dest%/*}
+                if ! ds_exists "$parent_ds"; then
+                    printf 'zfs mock: нет родителя %s\n' "$parent_ds" >&2
+                    exit 1
+                fi
+                ;;
+        esac
+        if ! ds_exists "$dest"; then
+            printf '%s\tnone\toff\t-\ton\n' "$dest" >>"$STATE/datasets"
+        fi
+        add_snap "$dest" "$snap"
+        printf 'received %s@%s\n' "$dest" "$snap" >&2
+        ;;
+    mount)
+        ds=
+        while [ $# -gt 0 ]; do
+            case $1 in
+                --) shift; ds=${1:-}; [ $# -gt 0 ] && shift ;;
+                -*) shift ;;
+                *) ds=$1; shift ;;
+            esac
+        done
+        pool=$(pool_of "$ds")
+        alt=$(prop "$pool" altroot)
+        case $alt in
+            /tmp/*|/var/tmp/*|/mnt/*) ;;
+            *) printf 'zfs mock: отказываюсь монтировать %s, altroot=%s\n' "$ds" "${alt:-пусто}" >&2; exit 1 ;;
+        esac
+        mkdir -p "$alt/etc" "$alt/bin" "$alt/boot"
+        printf 'mock rc.conf %s\n' "$ds" >"$alt/etc/rc.conf"
+        printf '#!/bin/sh\n' >"$alt/bin/sh"
+        chmod 755 "$alt/bin/sh"
+        ;;
+    *)
+        printf 'zfs mock: неизвестная команда %s\n' "$cmd" >&2
+        exit 1
+        ;;
+esac

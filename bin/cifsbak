@@ -1,0 +1,182 @@
+#!/bin/sh
+# cifsbak — бэкап FreeBSD на шару CIFS и восстановление из него.
+# Запускается базовым /bin/sh, без bash и без портов.
+set -eu
+umask 077
+
+CB_VERSION=1.0.0
+
+if command -v realpath >/dev/null 2>&1; then
+    cb_self=$(realpath "$0")
+else
+    cb_self=$(readlink -f "$0")
+fi
+cb_self_dir=$(dirname "$cb_self")
+if [ -f "$cb_self_dir/../lib/common.sh" ]; then
+    cb_lib=$(cd "$cb_self_dir/../lib" && pwd)
+elif [ -f "$cb_self_dir/../libexec/cifsbak/common.sh" ]; then
+    cb_lib=$(cd "$cb_self_dir/../libexec/cifsbak" && pwd)
+elif [ -f /usr/local/libexec/cifsbak/common.sh ]; then
+    cb_lib=/usr/local/libexec/cifsbak
+else
+    printf 'cifsbak: не найдены библиотеки рядом с %s\n' "$cb_self" >&2
+    exit 1
+fi
+
+# shellcheck disable=SC1091
+. "$cb_lib/common.sh"
+# shellcheck disable=SC1091
+. "$cb_lib/config.sh"
+# shellcheck disable=SC1091
+. "$cb_lib/discover.sh"
+# shellcheck disable=SC1091
+. "$cb_lib/backup.sh"
+# shellcheck disable=SC1091
+. "$cb_lib/plan.sh"
+# shellcheck disable=SC1091
+. "$cb_lib/restore.sh"
+
+opt_config=
+opt_full=0
+opt_dry_run=0
+opt_yes=0
+opt_id=
+opt_from=
+opt_to=
+opt_from_dir=
+opt_keyfile=
+opt_target=
+opt_mountpoint=
+cmd=
+
+cb_usage() {
+    cat <<'EOF'
+cifsbak — бэкап FreeBSD на шару CIFS и восстановление из него
+
+Использование:
+  cifsbak [-c файл] backup [--full] [--dry-run]
+  cifsbak [-c файл] list
+  cifsbak [-c файл] verify [--id ID] [--keyfile файл]
+  cifsbak [-c файл] plan [--id ID]
+  cifsbak [-c файл] restore --yes [--id ID] [--from пул] [--to пул] [--keyfile файл]
+  cifsbak [-c файл] drill --yes [--id ID] [--from пул] [--keyfile файл]
+  cifsbak [-c файл] restore-ufs --yes --mountpoint путь --target каталог [--id ID]
+  cifsbak [-c файл] doctor
+  cifsbak [-c файл] prune
+  cifsbak version
+
+Каждая копия лежит в каталоге назначения как <хост>/<дата> и содержит потоки
+ZFS, дампы UFS, разметку диска, образ ESP и файл RESTORE.txt. Рядом копируется
+сам cifsbak, поэтому с установочного носителя достаточно:
+
+  sh <бэкап>/tool/bin/cifsbak restore --yes
+
+Флаги:
+  -c, --config файл     конфиг (иначе /usr/local/etc/cifsbak.conf)
+  --full                полный бэкап, даже если backup_mode=auto
+  --dry-run             показать, что будет сохранено, ничего не меняя
+  --yes                 подтвердить восстановление или drill
+  --id ID               конкретная копия, иначе последняя
+  --from пул            какой пул из бэкапа принимать
+  --to пул              в какой импортированный пул принимать
+  --from-dir каталог    каталог хоста на шаре, если конфига ещё нет
+  --keyfile файл        ключ расшифровки
+  --mountpoint путь     исходная точка UFS
+  --target каталог      куда распаковать дамп UFS
+EOF
+}
+
+while [ $# -gt 0 ]; do
+    case $1 in
+        -c|--config)
+            [ $# -ge 2 ] || cb_die "нужно значение для $1"
+            opt_config=$2
+            shift 2
+            ;;
+        --full)
+            opt_full=1
+            shift
+            ;;
+        --dry-run)
+            opt_dry_run=1
+            shift
+            ;;
+        --yes)
+            opt_yes=1
+            shift
+            ;;
+        --id)
+            [ $# -ge 2 ] || cb_die "нужно значение для $1"
+            opt_id=$2
+            shift 2
+            ;;
+        --from)
+            [ $# -ge 2 ] || cb_die "нужно значение для $1"
+            opt_from=$2
+            shift 2
+            ;;
+        --to)
+            [ $# -ge 2 ] || cb_die "нужно значение для $1"
+            opt_to=$2
+            shift 2
+            ;;
+        --from-dir)
+            [ $# -ge 2 ] || cb_die "нужно значение для $1"
+            opt_from_dir=$2
+            shift 2
+            ;;
+        --keyfile)
+            [ $# -ge 2 ] || cb_die "нужно значение для $1"
+            opt_keyfile=$2
+            shift 2
+            ;;
+        --target)
+            [ $# -ge 2 ] || cb_die "нужно значение для $1"
+            opt_target=$2
+            shift 2
+            ;;
+        --mountpoint)
+            [ $# -ge 2 ] || cb_die "нужно значение для $1"
+            opt_mountpoint=$2
+            shift 2
+            ;;
+        -h|--help|help)
+            cmd=help
+            shift
+            ;;
+        --version|version)
+            cmd=version
+            shift
+            ;;
+        backup|list|verify|plan|restore|restore-ufs|drill|doctor|prune)
+            [ -z "$cmd" ] || cb_die "лишняя команда: $1"
+            cmd=$1
+            shift
+            ;;
+        *)
+            cb_die "неизвестный аргумент: $1"
+            ;;
+    esac
+done
+
+case ${cmd:-help} in
+    help)
+        cb_usage
+        ;;
+    version)
+        printf 'cifsbak %s\n' "$CB_VERSION"
+        ;;
+    backup) cb_cmd_backup ;;
+    list) cb_cmd_list ;;
+    verify) cb_cmd_verify ;;
+    plan) cb_cmd_plan ;;
+    restore) cb_cmd_restore ;;
+    restore-ufs) cb_cmd_restore_ufs ;;
+    drill) cb_cmd_drill ;;
+    doctor) cb_cmd_doctor ;;
+    prune) cb_cmd_prune ;;
+    *)
+        cb_usage >&2
+        exit 2
+        ;;
+esac

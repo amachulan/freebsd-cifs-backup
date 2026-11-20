@@ -1,0 +1,18 @@
+#!/bin/sh
+# Ежедневный запуск из periodic. Скопируйте в
+# /usr/local/etc/periodic/daily/900.cifsbak
+# и добавьте в /etc/periodic.conf:
+#   daily_cifsbak_enable="YES"
+
+if [ -r /etc/defaults/periodic.conf ]; then
+    . /etc/defaults/periodic.conf
+    source_periodic_confs
+fi
+
+case ${daily_cifsbak_enable:-NO} in
+    [Yy][Ee][Ss]) ;;
+    *) exit 0 ;;
+esac
+
+/usr/local/sbin/cifsbak backup
+exit $?

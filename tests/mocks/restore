@@ -1,0 +1,4 @@
+#!/bin/sh
+set -eu
+cat > ./RESTORED_FROM_DUMP
+exit 0

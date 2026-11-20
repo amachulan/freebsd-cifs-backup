@@ -1,0 +1,2 @@
+zroot/ROOT/default / zfs rw,noatime 0 0
+/dev/ada1p1 /mnt/ufs ufs rw 1 1

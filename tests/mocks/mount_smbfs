@@ -1,0 +1,15 @@
+#!/bin/sh
+set -eu
+STATE=${CIFSBAK_MOCK_STATE:?}
+printf '%s\n' "$*" >>"$STATE/mount-smbfs.log"
+if [ "${CIFSBAK_MOCK_MOUNT_FAIL:-}" = 1 ]; then
+    printf 'mock: tree connect failed\n' >&2
+    exit 1
+fi
+mp=
+for a in "$@"; do
+    mp=$a
+done
+mkdir -p "$mp"
+printf '%s\n' "$mp" >"$STATE/smbfs-mountpoint"
+exit 0

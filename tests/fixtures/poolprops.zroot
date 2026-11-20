@@ -1,0 +1,5 @@
+ashift=12
+bootfs=zroot/ROOT/default
+autoexpand=off
+autotrim=off
+altroot=-
