@@ -1,0 +1,17 @@
+#!/bin/sh
+# Подмена zdb: печатает метку диска из $STATE/zdb.<пул>, если она есть.
+set -eu
+STATE=${CIFSBAK_MOCK_STATE:?}
+printf '%s\n' "$*" >>"$STATE/zdb.log"
+pool=
+while [ $# -gt 0 ]; do
+    case $1 in
+        -C) shift ;;
+        --) shift ;;
+        -*) shift ;;
+        *) pool=$1; shift ;;
+    esac
+done
+if [ -n "$pool" ] && [ -f "$STATE/zdb.$pool" ]; then
+    cat "$STATE/zdb.$pool"
+fi

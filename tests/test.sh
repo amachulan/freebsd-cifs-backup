@@ -568,6 +568,33 @@ test_raw_send() {
     [ "$raw" = 1 ] || fail "raw=$raw, ожидалось 1"
 }
 
+test_ashift_from_disk() {
+    new_env
+    cat >"$STATE/poolprops.zroot" <<EOF
+ashift=0
+bootfs=zroot/ROOT/default
+autoexpand=off
+autotrim=off
+altroot=-
+EOF
+    printf '%s\n' '                ashift: 12' '                ashift: 9' >"$STATE/zdb.zroot"
+    write_conf
+    export CIFSBAK_NOW=20260115T030000Z
+    export CIFSBAK_EPOCH=1768446000
+    ok "ashift с метки диска" "$BIN" -c "$STATE/cifsbak.conf" backup
+    dir=$(bkdir)
+    if ! awk -F '\t' 'NR == 2 && $1 == "zroot" && $2 == "12" { found = 1 } END { exit found ? 0 : 1 }' \
+        "$dir/inventory/poolprops.tsv"; then
+        fail "в poolprops.tsv нет ashift 12"
+    fi
+    need "$dir/RESTORE.txt" "ashift=12"
+    need "$STATE/run.log" "на диске 12"
+    need "$STATE/run.log" "разный ashift"
+    if [ -f "$dir/inventory/zpool-get-zroot.txt.err" ]; then
+        fail "zpool get all завершился с ошибкой"
+    fi
+}
+
 unit_parsers
 unit_pipes
 unit_config
@@ -584,6 +611,7 @@ test_cifs_mount
 test_lock
 test_encrypt_backup
 test_raw_send
+test_ashift_from_disk
 
 left=$(find /tmp /var/tmp -maxdepth 1 \( -name 'cifsbak-run.*' -o -name 'cifsbak-enc.*' -o -name 'cifsbak-dec.*' -o -name 'cifsbak.*' \) -print | head)
 if [ -n "$left" ]; then

@@ -284,6 +284,49 @@ cb_list_ufs() {
     ' "$file"
 }
 
+# Свойство пула ashift часто равно 0: сектор выбрали при создании и в метку
+# диска записали 12, а в свойство пула нет. Для нового диска нужен сектор из метки.
+cb_vdev_ashift() {
+    pool=$1
+    reported=$2
+    case ${reported:-} in
+        ''|0|*[!0-9]*) ;;
+        *) printf '%s\n' "$reported"; return 0 ;;
+    esac
+    case $pool in
+        *[!A-Za-z0-9_.-]*) printf '%s\n' "${reported:--}"; return 0 ;;
+    esac
+    if ! cb_have zdb; then
+        printf '%s\n' "${reported:--}"
+        return 0
+    fi
+    found=$(zdb -C "$pool" 2>/dev/null | awk '
+        /ashift:[[:space:]]*[0-9]+/ {
+            n = $2 + 0
+            if (!(n in seen)) {
+                seen[n] = 1
+                kinds++
+            }
+            if (n > max) max = n
+        }
+        END {
+            if (max > 0) print max
+            if (kinds > 1) print "mixed"
+        }
+    ') || true
+    value=$(printf '%s\n' "$found" | awk 'NR == 1 { print; exit }')
+    case $value in
+        ''|*[!0-9]*) printf '%s\n' "${reported:--}"; return 0 ;;
+    esac
+    case $found in
+        *mixed*) cb_log warn "у дисков пула $pool разный ashift, в опись берётся $value" ;;
+    esac
+    if [ "$value" != "${reported:-0}" ]; then
+        cb_log info "ashift пула $pool в свойстве ${reported:-0}, на диске $value"
+    fi
+    printf '%s\n' "$value"
+}
+
 cb_collect_inventory() {
     inv=$cb_partial/inventory
     mkdir -p "$inv/gpart" "$inv/efi"
@@ -353,12 +396,14 @@ cb_collect_inventory() {
             continue
         fi
         cb_capture "$inv/zpool-status-$pool.txt" zpool status -P -- "$pool"
-        cb_capture "$inv/zpool-get-$pool.txt" zpool get -H all -- "$pool"
+        # «--» после all на FreeBSD 13.2 становится именем пула, а не концом опций.
+        cb_capture "$inv/zpool-get-$pool.txt" zpool get -H all "$pool"
         cb_capture "$inv/zpool-history-$pool.txt" zpool history -- "$pool"
         if [ -f "$cb_runtime/zfs-list-$pool" ]; then
             cp "$cb_runtime/zfs-list-$pool" "$inv/zfs-list-$pool.txt"
         fi
         ashift=$(zpool get -H -o value ashift -- "$pool" 2>/dev/null || true)
+        ashift=$(cb_vdev_ashift "$pool" "$ashift")
         bootfs=$(zpool get -H -o value bootfs -- "$pool" 2>/dev/null || true)
         autoexpand=$(zpool get -H -o value autoexpand -- "$pool" 2>/dev/null || true)
         autotrim=$(zpool get -H -o value autotrim -- "$pool" 2>/dev/null || true)
