@@ -12,14 +12,27 @@
 
 ## 1. Добраться до копии
 
-С установочного носителя поднимите сеть и смонтируйте шару:
+С установочного носителя поднимите сеть и смонтируйте шару.
+
+SMB:
 
 ```sh
 mkdir -p /mnt/backup
 mount_smbfs -I nas.example //backup@nas.example/freebsd-backup /mnt/backup
 ```
 
-Пароль `mount_smbfs` спросит сам. Каталог хоста:
+Пароль `mount_smbfs` спросит сам. Клиент из базы говорит только на SMB1.
+
+NFS, если копия лежит на экспорте:
+
+```sh
+mkdir -p /mnt/backup
+mount -t nfs -o nfsv3,tcp nas.example:/path/Intra_backup /mnt/backup
+```
+
+Путь берётся из `showmount -e nas.example`. На NAS у этого адреса должен быть доступ без подмены root, иначе файлы копии не прочитаются от root установщика.
+
+Каталог хоста:
 
 ```sh
 cd /mnt/backup/<hostname>

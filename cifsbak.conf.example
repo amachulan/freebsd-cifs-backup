@@ -3,11 +3,12 @@
 # /etc/master.passwd и ключи хоста, поэтому шара не менее секретна, чем сервер.
 
 # Куда складывать копии. Для cifs_mode=nomount каталог уже должен быть
-# точкой монтирования шары. Для cifs_mode=mount cifsbak монтирует её сам.
+# точкой монтирования шары, SMB или NFS. Для cifs_mode=mount cifsbak
+# монтирует SMB сам.
 destination=/mnt/backup
 
-# nomount — шара смонтирована заранее (fstab, рекомендуется).
-# mount — cifsbak вызывает mount_smbfs на время бэкапа.
+# nomount — шара смонтирована заранее (fstab, рекомендуется). Подходит и NFS.
+# mount — cifsbak вызывает mount_smbfs на время бэкапа. Это только SMB1.
 cifs_mode=nomount
 
 # Эти поля нужны только при cifs_mode=mount.
